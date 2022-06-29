@@ -78,6 +78,7 @@
             const { value, done } = await textStream.read();
             if (done) break;
             for (const char of value) {
+                if (!state) break;
                 const { newState, includeInBuffer, yieldBuffer } = state.processNext(char);
                 if (includeInBuffer) buffer += char;
                 if (yieldBuffer) {

@@ -73,6 +73,7 @@ function* slurpJson(json) {
     let state = new BeforeArrayState();
     buffer = '';
     for (const char of json) {
+        if(!state) break
         const { newState, includeInBuffer, yieldBuffer } = state.processNext(char);
         if (includeInBuffer) buffer += char;
         if (yieldBuffer) {
