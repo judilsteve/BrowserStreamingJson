@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Streaming JSON deserialisation test</title>
+</head>
+
+<body>
+    <div id="streaming"></div>
+</body>
+
+<script>
+    async function main() {
+        const root = document.getElementById('streaming');
+        const response = await fetch('/json');
+        for await (const item of slurpJson(response)) {
+            const para = document.createElement('p');
+            para.innerText = item.message;
+            root.appendChild(para);
+        }
+    }
+    main();
+</script>
+
+<script>
+    class BeforeArrayState {
+        processNext(char) {
+            if (char === '[') return { newState: new BetweenElementsState(), includeInBuffer: false, yieldBuffer: false };
+            else if (!' \n'.includes(char)) throw new Error(`Unexpected character ${char} before start of top-level array`);
+            else return { newState: this, includeInBuffer: false, yieldBuffer: false };
+        }
+    }
+
+    class BetweenElementsState {
+        processNext(char) {
+            if (', \n'.includes(char)) return { newState: this, includeInBuffer: false, yieldBuffer: false };
+            else if (char === ']') return { newState: undefined, includeInBuffer: false, yieldBuffer: false };
+            else return { newState: new InsideElementState(char), includeInBuffer: true, yieldBuffer: false };
+        }
+    }
+
+    class InsideElementState {
+        constructor(firstChar) {
+            this.nestingDepth = '{['.includes(firstChar) ? 1 : 0;
+            this.insideString = firstChar === '"';
+            this.isEscapeSequence = false;
+        }
+
+        processNext(char) {
+            if (this.insideString) {
+                if (char === '\\') {
+                    this.isEscapeSequence = true;
+                } else if (this.isEscapeSequence) {
+                    this.isEscapeSequence = false;
+                } else if (char === '"') {
+                    this.insideString = false;
+                }
+            } else if (char === '"') {
+                this.insideString = true;
+            } else if ('{['.includes(char)) {
+                this.nestingDepth++;
+            } else if ('}]'.includes(char)) {
+                this.nestingDepth--;
+                if(this.nestingDepth < 0) return { newState: undefined, includeInBuffer: false, yieldBuffer: true };
+            } else if (this.nestingDepth === 0 && char === ',') {
+                return { newState: new BetweenElementsState(), includeInBuffer: false, yieldBuffer: true };
+            }
+            return { newState: this, includeInBuffer: this.insideString || !' \n'.includes(char), yieldBuffer: false };
+        }
+    }
+
+    async function* slurpJson(jsonResponse) {
+        const textStream = jsonResponse.body.pipeThrough(new TextDecoderStream()).getReader();
+        let state = new BeforeArrayState();
+        buffer = '';
+        while (true) {
+            const { value, done } = await textStream.read();
+            if (done) break;
+            for (const char of value) {
+                const { newState, includeInBuffer, yieldBuffer } = state.processNext(char);
+                if (includeInBuffer) buffer += char;
+                if (yieldBuffer) {
+                    yield JSON.parse(buffer);
+                    buffer = '';
+                }
+                state = newState;
+            }
+        }
+    }
+</script>
+</html>
